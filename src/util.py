@@ -79,7 +79,7 @@ def plot_attention(model, X_train, X_test, column_names, neighbors, save_path):
     #w.shape
     plt.figure(figsize=[8,5])
     plt.pcolor(w)
-    plt.yticks([i for i in range(len(column_names)-1)],[column_names[i] for i in neighbors[1:]])
+    plt.yticks([i+0.5 for i in range(len(column_names)-1)],[column_names[i] for i in neighbors[1:]])
     plt.title(column_names[neighbors[0]])
 
     plt.savefig(save_path+column_names[neighbors[0]]+'_attention.png')
