@@ -7,7 +7,7 @@ from torch.autograd import Variable
 # 1dcnn attention with GRU seq2seq network 
 
 class Encoder(nn.Module):
-    def __init__(self,input_dim,cnn_hidden_size,cnn_kernel_size): 
+    def __init__(self,input_dim, input_length, cnn_hidden_size,cnn_kernel_size, method): 
         super(Encoder,self).__init__()
         self.input_dim=input_dim
         self.cnn_hidden_size=cnn_hidden_size
@@ -15,25 +15,37 @@ class Encoder(nn.Module):
         self.pooling=nn.AvgPool1d(kernel_size=2)
         #self.pooling=nn.MaxPool1d(kernel_size=2)
         self.convs=nn.ModuleList([nn.Conv1d(in_channels=1,out_channels=cnn_hidden_size,kernel_size=cnn_kernel_size) for i in range(input_dim)])
+        self.attn_method=method
+        self.output_shape=self.count_vec_size(input_length)
         
+        if method == "general":
+            self.W = nn.Linear(self.output_shape, self.output_shape, bias=False)
+      
+        elif method == "bahdanau":
+            self.W = nn.Linear(self.output_shape, self.output_shape, bias=False)
+            self.weight = nn.Parameter(torch.randn(1, self.output_shape))
     
     def forward(self,x):
+        
         main_vec=F.relu(self.convs[0](x[:,:,0].unsqueeze(1)))
         main_vec=self.pooling(main_vec).flatten(start_dim=1).unsqueeze(1) #shape:(batch, 1, output_shape)
+        
         if self.input_dim==1:
             return main_vec
-        output_shape=main_vec.shape[2]
+        #output_shape=main_vec.shape[2]
+        
         #print(main_vec.shape)
         attn_weights=Variable(x.data.new(x.size(0), 1,self.input_dim-1).zero_())
-        aux_vec=Variable(x.data.new(x.size(0), self.input_dim-1,output_shape).zero_())
+        aux_vec=Variable(x.data.new(x.size(0), self.input_dim-1, self.output_shape).zero_())
        
         for i in range(1,self.input_dim):
             others=F.relu(self.convs[i](x[:,:,i].unsqueeze(1)))
             others=self.pooling(others).flatten(start_dim=1)
            
             aux_vec[:,i-1,:]=others
-            attn_weights[:,:,i-1]=main_vec.bmm(others.unsqueeze(2)).squeeze(2) #dot attention
+            attn_weights[:,:,i-1]= self.score(main_vec, others) #main_vec.bmm(others.unsqueeze(2)).squeeze(2) #dot attention
         
+        #print(attn_weights)
         attn_weights=F.softmax(attn_weights,dim=2)
         
         weighted_aux_vec=attn_weights.bmm(aux_vec)
@@ -44,6 +56,24 @@ class Encoder(nn.Module):
         conv_output_size=(input_len-(self.cnn_kernel_size-1)-1)+1
         pooling_output_size=int(conv_output_size/2)
         return pooling_output_size*self.cnn_hidden_size
+   
+    def score(self, vec1, vec2):
+        #print("vec1", vec1.shape)
+        #print("vec2", vec2.shape)
+        
+        if self.attn_method=='dot':
+            return vec1.bmm(vec2.unsqueeze(2)).squeeze(2)
+        
+        elif self.attn_method=='general':
+            
+            out = self.W(vec2)
+            return vec1.bmm(out.unsqueeze(2)).squeeze(2)
+        
+        elif self.attn_method=='bahdanau':
+            out = torch.tanh(self.W(vec1.squeeze(1)+vec2)).unsqueeze(1)
+            batch_size=out.shape[0]
+            #print(out)
+            return out.bmm(self.weight.repeat(batch_size,1).unsqueeze(2)).squeeze(2)
     
     
 class Decoder(nn.Module):
@@ -77,18 +107,20 @@ class Decoder(nn.Module):
         return result    
 
 class S2S_cnn_attn(nn.Module):
-    def __init__(self,cnn_parameters,fc_size,input_dim,input_length,output_length):
+    def __init__(self, cnn_parameters, fc_size, input_dim, input_length, output_length, method='dot'):
         #cnn_parameters=(cnn_hidden_size,kernel_size)
         super(S2S_cnn_attn,self).__init__()
         
         self.input_dim=input_dim
         self.output_length=output_length
         
-        self.encoder=Encoder(input_dim,cnn_parameters[0],cnn_parameters[1])
+        self.encoder=Encoder(input_dim, input_length, cnn_parameters[0], cnn_parameters[1], method)
+        
         if input_dim==1:
-            rnn_hidden_size=self.encoder.count_vec_size(input_length)
+            rnn_hidden_size=self.encoder.output_shape #count_vec_size(input_length)
         else:
-            rnn_hidden_size=2*self.encoder.count_vec_size(input_length)
+            rnn_hidden_size=2*self.encoder.output_shape #count_vec_size(input_length)
+            
         self.decoder=Decoder(rnn_hidden_size,output_length,fc_size)
        
     

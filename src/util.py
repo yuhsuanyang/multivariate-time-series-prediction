@@ -28,6 +28,36 @@ def compute_loss(model, feature, label, batch, opt, loss_func, train, device):
     total_loss=total_loss/(int(len(feature)/batch)+1)
     return total_loss
 
+def compute_loss_ver2(model, feature, label, batch, opt, loss_func, train, device): #compute loss for reconstruction error
+    total_loss=0
+    start=0
+    for j in range(int(len(feature)/batch)+1):
+        if start+batch>len(feature):
+            end=-1
+        else:
+            end=start+batch
+            
+        x=feature[start:end].to(device) #x,y放到gpu裡
+        y=label[start:end].to(device)
+        
+        pred, recon=model(x)
+        pred=pred.to(device)
+        recon=recon.to(device)
+        loss=loss_func(pred,y)
+        loss1=loss+loss_func(recon, x)
+      
+        if train:
+            opt.zero_grad() #梯度歸零
+            #loss.backward() #back propogation
+            loss1.backward()
+            opt.step() #更新參數
+        #print('batch loss:'+str(loss.item()))
+        total_loss+=loss.item()
+        torch.cuda.empty_cache()
+        start=end
+    total_loss=total_loss/(int(len(feature)/batch)+1)
+    return total_loss
+
 def mape(prediction,truth,M,m):
     diff=(prediction-truth).detach().numpy()*M
     diff=np.absolute(diff/(truth.detach().numpy()*M+m))
